@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional, Callable, Union
 from dataclasses import dataclass, field
 from datetime import datetime
+from numbers import Number
 
 
 @dataclass
