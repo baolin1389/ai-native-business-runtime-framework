@@ -1,0 +1,133 @@
+# Followup Entity — Domain DSL Definition
+# ========================================
+# AI reads this to understand: fields, constraints, relations, actions
+
+entity: Followup
+description: "Follow-up records for customer interactions"
+table_name: followups
+version: "1.0"
+
+# ─── Fields ─────────────────────────────────────────────────────────
+fields:
+  followup_id:
+    type: string
+    primary_key: true
+    description: "Auto-generated follow-up ID (format: FUP_YYYYMMDD_HHMMSS)"
+    auto_generate: true
+
+  customer_id:
+    type: string
+    required: true
+    foreign_key: true
+    description: "Link to parent Customer"
+    validation:
+      not_null: true
+
+  content:
+    type: text
+    required: true
+    max_length: 65535
+    description: "Follow-up content / notes"
+
+  followup_type:
+    type: string
+    default: call
+    description: "Type of follow-up interaction"
+    enum_values: [call, email, meeting, wechat, video, other]
+
+  followup_date:
+    type: datetime
+    default: now
+    description: "When the follow-up occurred"
+
+  next_followup_date:
+    type: datetime
+    description: "Scheduled next follow-up date"
+
+  created_by:
+    type: string
+    description: "Who created this follow-up record"
+    default: "system"
+
+# ─── Constraints ─────────────────────────────────────────────────────
+constraints:
+  - name: customer_id_required
+    description: "Follow-up must be linked to a customer"
+    condition: "customer_id is not null and customer_id != ''"
+    error_message: "Customer ID is required for follow-up"
+    severity: error
+
+  - name: content_not_empty
+    description: "Follow-up content cannot be empty"
+    condition: "content is not null and trim(content) != ''"
+    error_message: "Follow-up content is required"
+    severity: error
+
+  - name: valid_followup_type
+    description: "Follow-up type must be valid"
+    condition: "followup_type in ['call','email','meeting','wechat','video','other']"
+    error_message: "Invalid follow-up type"
+    severity: warning
+
+  - name: next_followup_date_logical
+    description: "Next follow-up date should be in the future if set"
+    condition: "next_followup_date is null or next_followup_date > followup_date"
+    error_message: "Next follow-up date must be after this follow-up date"
+    severity: warning
+
+# ─── Relations ───────────────────────────────────────────────────────
+relations:
+  - type: belongs_to
+    target: Customer
+    foreign_key: customer_id
+    description: "Follow-up belongs to a customer"
+
+# ─── Actions ─────────────────────────────────────────────────────────
+actions:
+  - name: create_followup
+    description: "Create a new follow-up record"
+    params:
+      - name: customer_id
+        type: string
+        required: true
+        description: "Customer ID"
+      - name: content
+        type: text
+        required: true
+        description: "Follow-up content"
+      - name: followup_type
+        type: string
+        required: false
+        default: call
+        description: "Type of interaction"
+      - name: next_followup_date
+        type: datetime
+        required: false
+        description: "Schedule next follow-up"
+
+  - name: list_followups
+    description: "List follow-up records for a customer"
+    params:
+      - name: customer_id
+        type: string
+        required: true
+        description: "Customer ID"
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+        description: "Maximum results"
+
+  - name: get_followup
+    description: "Get a follow-up by ID"
+    params:
+      - name: followup_id
+        type: string
+        required: true
+        description: "Follow-up ID"
+
+metadata:
+  category: crm
+  retention_period_days: 1095
+  parent_module: trade_crm
+  audit_log_enabled: true

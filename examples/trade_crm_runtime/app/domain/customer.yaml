@@ -1,0 +1,250 @@
+# Customer Entity — Domain DSL Definition
+# ==========================================
+# AI reads this to understand: fields, constraints, state_machine, relations, actions
+
+entity: Customer
+description: "Foreign trade customer with contact status lifecycle"
+table_name: customers
+version: "1.0"
+
+# ─── Fields ─────────────────────────────────────────────────────────
+fields:
+  customer_id:
+    type: string
+    primary_key: true
+    description: "Auto-generated unique customer ID (format: CUST_YYYYMMDD_HHMMSS)"
+    auto_generate: true
+
+  company_name:
+    type: string
+    required: true
+    max_length: 255
+    description: "Customer company name"
+    validation:
+      min_length: 2
+
+  contact_name:
+    type: string
+    required: true
+    max_length: 100
+    description: "Primary contact person's name"
+
+  contact_email:
+    type: string
+    required: true
+    max_length: 255
+    description: "Primary contact email"
+    validation:
+      format: email
+      pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+  contact_phone:
+    type: string
+    max_length: 50
+    description: "Phone number with country code"
+    validation:
+      pattern: '^[+]?[0-9\s\-()]{7,50}$'
+
+  country:
+    type: string
+    required: true
+    max_length: 100
+    description: "Country of business operation"
+
+  business_type:
+    type: string
+    max_length: 50
+    description: "distributor | manufacturer | agent | trader"
+    enum_values: [distributor, manufacturer, agent, trader, other]
+
+  contact_status:
+    type: string
+    default: "new"
+    description: "Customer relationship stage"
+    enum_values: [new, 未联系, 已联系, 已报价, 已打样, 成交, closed_won, closed_lost]
+
+  notes:
+    type: text
+    max_length: 65535
+    description: "Free-form notes about the customer"
+
+  follow_up_count:
+    type: integer
+    default: 0
+    description: "Number of follow-up interactions"
+
+  created_at:
+    type: datetime
+    default: now
+    description: "Record creation timestamp"
+
+  updated_at:
+    type: datetime
+    description: "Last update timestamp"
+
+# ─── Constraints ─────────────────────────────────────────────────────
+constraints:
+  - name: valid_email_format
+    description: "Email must be valid format"
+    condition: 'contact_email matches "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"'
+    error_message: "Invalid email format"
+    severity: error
+
+  - name: valid_contact_status
+    description: "Contact status must be a valid value"
+    condition: "contact_status in ['new','未联系','已联系','已报价','已打样','成交','closed_won','closed_lost']"
+    error_message: "Contact status must be one of: new, 未联系, 已联系, 已报价, 已打样, 成交, closed_won, closed_lost"
+    severity: error
+
+  - name: follow_up_count_non_negative
+    description: "Follow-up count cannot be negative"
+    condition: "follow_up_count >= 0"
+    error_message: "Follow-up count cannot be negative"
+    severity: error
+
+  - name: company_name_not_empty
+    description: "Company name cannot be empty or whitespace only"
+    condition: "company_name is not null and trim(company_name) != ''"
+    error_message: "Company name is required"
+    severity: error
+
+# ─── State Machine ───────────────────────────────────────────────────
+state_machine:
+  name: customer_lifecycle
+  description: "Customer development lifecycle from new to closed"
+  initial_state: new
+  terminal_states: [closed_won, closed_lost]
+
+  states:
+    - name: new
+      description: "Newly converted customer, not yet contacted"
+    - name: 未联系
+      description: "Customer identified but not yet contacted"
+    - name: 已联系
+      description: "Active communication with customer"
+    - name: 已报价
+      description: "Quote sent to customer"
+    - name: 已打样
+      description: "Sample sent or confirmed"
+    - name: 成交
+      description: "Deal closed - customer converted"
+    - name: closed_won
+      description: "Successfully closed as won"
+    - name: closed_lost
+      description: "Closed as lost"
+
+  transitions:
+    - from_state: new
+      to_state: 未联系
+      trigger_action: first_contact
+      description: "Initial outreach made"
+    - from_state: 未联系
+      to_state: 已联系
+      trigger_action: receive_reply
+      description: "Customer replies to outreach"
+    - from_state: 已联系
+      to_state: 已报价
+      trigger_action: send_quote
+      description: "Send formal quote"
+    - from_state: 已报价
+      to_state: 已打样
+      trigger_action: send_sample
+      description: "Send product sample"
+    - from_state: 已打样
+      to_state: 成交
+      trigger_action: close_deal
+      description: "Customer confirms order"
+    - from_state: 成交
+      to_state: closed_won
+      trigger_action: mark_won
+      description: "Mark customer as won"
+    - from_state: 已联系
+      to_state: closed_lost
+      trigger_action: mark_lost
+      condition: "follow_up_count >= 3"
+      description: "Mark as lost after 3 failed contact attempts"
+
+# ─── Relations ───────────────────────────────────────────────────────
+relations:
+  - type: has_many
+    target: Followup
+    foreign_key: customer_id
+    description: "Customer can have many follow-up records"
+    cascade: delete
+
+# ─── Actions ─────────────────────────────────────────────────────────
+actions:
+  - name: create_customer
+    description: "Create a new customer record"
+    params:
+      - name: company_name
+        type: string
+        required: true
+        description: "Company name"
+      - name: contact_name
+        type: string
+        required: true
+        description: "Primary contact person"
+      - name: contact_email
+        type: string
+        required: true
+        description: "Contact email"
+      - name: country
+        type: string
+        required: true
+        description: "Country"
+      - name: business_type
+        type: string
+        required: false
+        description: "Business type"
+      - name: notes
+        type: text
+        required: false
+        description: "Additional notes"
+
+  - name: list_customers
+    description: "List customers with optional filters"
+    params:
+      - name: contact_status
+        type: string
+        required: false
+        description: "Filter by contact status"
+      - name: country
+        type: string
+        required: false
+        description: "Filter by country"
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+        description: "Maximum results to return"
+
+  - name: get_customer
+    description: "Get a customer by ID"
+    params:
+      - name: customer_id
+        type: string
+        required: true
+        description: "Customer ID"
+
+  - name: update_customer
+    description: "Update customer fields"
+    params:
+      - name: customer_id
+        type: string
+        required: true
+        description: "Customer ID"
+      - name: contact_status
+        type: string
+        required: false
+        description: "New contact status"
+      - name: notes
+        type: text
+        required: false
+        description: "Updated notes"
+
+metadata:
+  category: crm
+  retention_period_days: 2555
+  parent_module: trade_crm
+  audit_log_enabled: true

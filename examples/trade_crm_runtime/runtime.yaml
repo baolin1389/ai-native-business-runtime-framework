@@ -1,0 +1,125 @@
+# Trade CRM Runtime — Reference Implementation
+# ============================================
+#
+# This is the REFERENCE RUNTIME for the AI Business Runtime Framework.
+# Purpose: Demo | Tutorial | Benchmark | Template
+#
+# AI can learn from this to understand:
+#   - How runtime.yaml defines a complete business runtime
+#   - How domain YAMLs describe entities, constraints, state machines
+#   - How engine.execute() routes actions to handlers
+#   - How SQLite + SQLModel persist domain data
+
+name: trade_crm_runtime
+description: |
+  Reference CRM runtime for foreign trade business.
+  Demonstrates: Lead → Customer → Follow-up lifecycle,
+  multi-wave email tracking, contact status progression.
+version: "1.0"
+author: Sep Orange International Trade
+website: https://github.com/baolin1389/ai-native-business-runtime-framework
+
+# Entry point (AI uses this to understand how to invoke the runtime)
+entry: app.main:CLI
+
+# Standard directory layout (AI-readable — this is the CONVENTION)
+directories:
+  app/domain/: "Entity DSL definitions (YAML). Each entity = one YAML file."
+  app/runtime/actions/: "Business action implementations. One file per domain."
+  app/infrastructure/: "Database models (SQLModel) and repositories."
+  data/: "SQLite database files. Never commit .db files."
+
+# Infrastructure
+infrastructure:
+  database:
+    type: sqlite
+    path: data/crm.db
+    auto_init: true
+
+# Entity registry — AI reads this to know what entities exist
+entities:
+  - name: Customer
+    domain_file: app/domain/customer.yaml
+    description: "Foreign trade customer with contact status lifecycle"
+  - name: Followup
+    domain_file: app/domain/followup.yaml
+    description: "Follow-up records linked to customers"
+
+# Actions registry — AI reads this to know what it can call
+actions:
+  - name: create_customer
+    domain: customer
+    params:
+      - company_name (required)
+      - contact_name (required)
+      - contact_email (required)
+      - country (required)
+      - business_type (optional)
+      - notes (optional)
+  - name: list_customers
+    domain: customer
+    params:
+      - contact_status (optional, filter)
+      - country (optional, filter)
+      - limit (optional, default=100)
+  - name: get_customer
+    domain: customer
+    params:
+      - customer_id (required)
+  - name: update_customer
+    domain: customer
+    params:
+      - customer_id (required)
+      - contact_status (optional)
+      - notes (optional)
+  - name: add_followup
+    domain: followup
+    params:
+      - customer_id (required)
+      - content (required)
+      - followup_type (optional, default=call)
+      - next_followup_date (optional)
+  - name: list_followups
+    domain: followup
+    params:
+      - customer_id (required)
+      - limit (optional, default=100)
+
+# State machine definitions (AI-readable)
+state_machines:
+  customer_lifecycle:
+    entity: Customer
+    initial_state: new
+    terminal_states: [closed_won, closed_lost]
+    states:
+      - name: new
+        description: "Newly converted customer"
+      - name: 未联系
+        description: "Customer identified, not yet contacted"
+      - name: 已联系
+        description: "Active communication established"
+      - name: 已报价
+        description: "Quote sent to customer"
+      - name: 已打样
+        description: "Sample sent or confirmed"
+      - name: 成交
+        description: "Deal closed successfully"
+      - name: closed_won
+        description: "Customer closed as won"
+      - name: closed_lost
+        description: "Customer closed as lost"
+
+# Constraints — AI reads these to understand business rules
+constraints:
+  - name: email_format
+    entity: Customer
+    condition: "contact_email matches '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'"
+    error_message: "Invalid email format"
+  - name: valid_contact_status
+    entity: Customer
+    condition: "contact_status in ['new','未联系','已联系','已报价','已打样','成交','closed_won','closed_lost']"
+    error_message: "Invalid contact status value"
+  - name: followup_requires_customer
+    entity: Followup
+    condition: "customer_id is not null"
+    error_message: "Follow-up must belong to a customer"
