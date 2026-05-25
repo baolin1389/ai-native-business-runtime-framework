@@ -1,0 +1,225 @@
+# AI Business Runtime Framework - Schema Definition
+# This file defines the runtime configuration schema for AI business applications
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://github.com/your-org/ai-business-runtime-framework/runtime.schema.yaml"
+
+title: AIRuntimeConfig
+description: Configuration schema for the AI Business Runtime Framework
+type: object
+
+required:
+  - runtime
+  - version
+  - mcp_adapter
+  - validation
+
+properties:
+  runtime:
+    type: object
+    description: Core runtime configuration
+    properties:
+      name:
+        type: string
+        description: Name of the runtime instance
+        minLength: 1
+        maxLength: 255
+      mode:
+        type: string
+        enum: ["development", "testing", "production"]
+        default: "development"
+      log_level:
+        type: string
+        enum: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        default: "INFO"
+      max_concurrent_tasks:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    required:
+      - name
+
+  version:
+    type: string
+    description: Runtime version identifier
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+
+  mcp_adapter:
+    type: object
+    description: MCP (Model Context Protocol) adapter configuration
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      provider:
+        type: string
+        enum: ["openai", "anthropic", "google", "custom"]
+        default: "openai"
+      endpoint:
+        type: string
+        format: uri
+      api_key_env:
+        type: string
+        description: Environment variable name containing API key
+      timeout:
+        type: integer
+        minimum: 1
+        maximum: 300
+        default: 60
+      rate_limit:
+        type: object
+        properties:
+          requests_per_minute:
+            type: integer
+            minimum: 1
+          burst_size:
+            type: integer
+            minimum: 1
+      retry:
+        type: object
+        properties:
+          max_attempts:
+            type: integer
+            minimum: 1
+            maximum: 10
+          backoff_factor:
+            type: number
+            minimum: 0
+    required:
+      - provider
+
+  validation:
+    type: object
+    description: Validation rules configuration
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      strict_mode:
+        type: boolean
+        default: false
+      rules:
+        type: array
+        items:
+          type: object
+          properties:
+            field:
+              type: string
+            rule_type:
+              type: string
+              enum:
+                - "required"
+                - "type"
+                - "min_length"
+                - "max_length"
+                - "min_value"
+                - "max_value"
+                - "pattern"
+                - "choices"
+                - "custom"
+            value: {}
+            message:
+              type: string
+    default:
+      enabled: true
+
+  engine:
+    type: object
+    description: Execution engine configuration
+    properties:
+      scheduler_type:
+        type: string
+        enum: ["FIFO", "Priority", "Deadline"]
+        default: "FIFO"
+      executor_type:
+        type: string
+        enum: ["ThreadPool", "ProcessPool", "AsyncIO"]
+        default: "AsyncIO"
+      max_workers:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      task_timeout:
+        type: integer
+        minimum: 1
+        description: Task timeout in seconds
+        default: 300
+
+  state:
+    type: object
+    description: State management configuration
+    properties:
+      backend:
+        type: string
+        enum: ["memory", "redis", "postgres", "sqlite"]
+        default: "memory"
+      persistence_enabled:
+        type: boolean
+        default: false
+      redis_url:
+        type: string
+        format: uri
+      postgres_url:
+        type: string
+        format: uri
+
+  domain:
+    type: object
+    description: Domain-specific configuration
+    properties:
+      workflows:
+        type: array
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+            steps:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  action:
+                    type: string
+                  config:
+                    type: object
+
+  plugins:
+    type: array
+    description: List of enabled plugins
+    items:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        config:
+          type: object
+
+  security:
+    type: object
+    description: Security configuration
+    properties:
+      api_key_required:
+        type: boolean
+        default: false
+      allowed_origins:
+        type: array
+        items:
+          type: string
+      rate_limiting:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+          max_requests:
+            type: integer
+          window_seconds:
+            type: integer
+
+additionalProperties: true
