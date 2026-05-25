@@ -188,6 +188,445 @@ properties:
                   config:
                     type: object
 
+      # Domain DSL Schema - Entity Definitions
+      entities:
+        type: array
+        description: Domain entity definitions using DSL schema
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Entity name (PascalCase recommended)
+              minLength: 1
+              maxLength: 255
+            table_name:
+              type: string
+              description: Database table name
+              pattern: "^[a-z_][a-z0-9_]*$"
+            description:
+              type: string
+            fields:
+              type: array
+              description: Entity fields
+              items:
+                $ref: "#/properties/domain/properties/fields/items"
+            constraints:
+              type: array
+              description: Entity-level constraints
+              items:
+                $ref: "#/properties/domain/properties/constraints/items"
+            state_machine:
+              $ref: "#/properties/domain/properties/state_machines/items"
+            relations:
+              type: array
+              description: Entity relations
+              items:
+                $ref: "#/properties/domain/properties/relations/items"
+            actions:
+              type: array
+              description: Entity actions
+              items:
+                $ref: "#/properties/domain/properties/actions/items"
+        required:
+          - name
+
+      # Field Definitions
+      fields:
+        type: array
+        description: Reusable field definitions for entities
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Field name (snake_case recommended)
+              minLength: 1
+              maxLength: 255
+            type:
+              type: string
+              enum:
+                - "string"
+                - "integer"
+                - "float"
+                - "boolean"
+                - "datetime"
+                - "date"
+                - "time"
+                - "uuid"
+                - "json"
+                - "text"
+                - "enum"
+                - "array"
+                - "object"
+            description:
+              type: string
+            default:
+              description: Default value for the field
+            nullable:
+              type: boolean
+              default: false
+            readonly:
+              type: boolean
+              default: false
+            unique:
+              type: boolean
+              default: false
+            indexed:
+              type: boolean
+              default: false
+            enum_values:
+              type: array
+              items:
+                type: string
+              description: Required when type is enum
+            min_length:
+              type: integer
+              minimum: 0
+            max_length:
+              type: integer
+              minimum: 1
+            min_value:
+              type: number
+            max_value:
+              type: number
+            regex:
+              type: string
+              description: Regex pattern for string validation
+            related_entity:
+              type: string
+              description: For foreign key fields, the related entity name
+            field_type:
+              type: string
+              enum:
+                - "primary_key"
+                - "foreign_key"
+                - "attribute"
+                - "calculated"
+                - "timestamp"
+        required:
+          - name
+          - type
+
+      # Constraint Definitions
+      constraints:
+        type: array
+        description: Reusable constraint definitions
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Constraint name
+              minLength: 1
+            type:
+              type: string
+              enum:
+                - "unique"
+                - "not_null"
+                - "check"
+                - "foreign_key"
+                - "primary_key"
+                - "index"
+            fields:
+              type: array
+              items:
+                type: string
+              description: Fields this constraint applies to
+            condition:
+              type: string
+              description: Conditional expression (for check constraints)
+            reference:
+              type: object
+              description: For foreign key constraints
+              properties:
+                entity:
+                  type: string
+                fields:
+                  type: array
+                  items:
+                    type: string
+            message:
+              type: string
+              description: Error message when constraint is violated
+        required:
+          - name
+          - type
+          - fields
+
+      # State Machine Definitions
+      state_machines:
+        type: array
+        description: State machine definitions for entity lifecycle management
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: State machine name
+              minLength: 1
+            entity:
+              type: string
+              description: Entity this state machine applies to
+            initial_state:
+              type: string
+              description: Initial state name
+            states:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: State name
+                  type:
+                    type: string
+                    enum:
+                      - "initial"
+                      - "normal"
+                      - "final"
+                      - "choice"
+                  entry_actions:
+                    type: array
+                    items:
+                      type: string
+                    description: Actions to execute when entering this state
+                  exit_actions:
+                    type: array
+                    items:
+                      type: string
+                    description: Actions to execute when exiting this state
+                  is_final:
+                    type: boolean
+                    default: false
+                required:
+                  - name
+            transitions:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  from_state:
+                    type: string
+                  to_state:
+                    type: string
+                  event:
+                    type: string
+                    description: Event that triggers this transition
+                  condition:
+                    type: string
+                    description: Guard condition for the transition
+                  actions:
+                    type: array
+                    items:
+                      type: string
+                    description: Actions to execute during transition
+                  timeout:
+                    type: integer
+                    description: Timeout in seconds for auto-transition
+                required:
+                  - name
+                  - from_state
+                  - to_state
+            events:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  parameters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        required:
+                          type: boolean
+        required:
+          - name
+          - entity
+          - initial_state
+          - states
+          - transitions
+
+      # Relation Definitions
+      relations:
+        type: array
+        description: Relationship definitions between entities
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Relation name
+            type:
+              type: string
+              enum:
+                - "one_to_one"
+                - "one_to_many"
+                - "many_to_one"
+                - "many_to_many"
+                - "self_referential"
+            source_entity:
+              type: string
+              description: Source entity name
+            source_fields:
+              type: array
+              items:
+                type: string
+              description: Source entity foreign key fields
+            target_entity:
+              type: string
+              description: Target entity name
+            target_fields:
+              type: array
+              items:
+                type: string
+              description: Target entity primary key fields
+            through_entity:
+              type: string
+              description: For many_to_many relations, the junction table entity
+            cascade_on_delete:
+              type: boolean
+              default: false
+            nullable:
+              type: boolean
+              default: true
+            description:
+              type: string
+        required:
+          - name
+          - type
+          - source_entity
+          - target_entity
+
+      # Action Definitions
+      actions:
+        type: array
+        description: Business action definitions that operate on entities
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Action name (PascalCase recommended)
+              minLength: 1
+            entity:
+              type: string
+              description: Entity this action belongs to
+            description:
+              type: string
+            type:
+              type: string
+              enum:
+                - "create"
+                - "read"
+                - "update"
+                - "delete"
+                - "query"
+                - "aggregate"
+                - "custom"
+            parameters:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  type:
+                    type: string
+                  required:
+                    type: boolean
+                    default: false
+                  default_value: {}
+                  description:
+                    type: string
+            returns:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - "entity"
+                    - "collection"
+                    - "boolean"
+                    - "integer"
+                    - "string"
+                    - "object"
+                    - "void"
+                fields:
+                  type: array
+                  items:
+                    type: string
+                  description: Fields to return (for read/query actions)
+            pre_conditions:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  operator:
+                    type: string
+                    enum:
+                      - "eq"
+                      - "ne"
+                      - "gt"
+                      - "gte"
+                      - "lt"
+                      - "lte"
+                      - "in"
+                      - "not_in"
+                      - "is_null"
+                      - "is_not_null"
+                      - "contains"
+                      - "starts_with"
+                      - "ends_with"
+                  value: {}
+            post_conditions:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  operator:
+                    type: string
+                  value: {}
+            side_effects:
+              type: array
+              description: Actions that should trigger as side effects
+              items:
+                type: string
+            validation:
+              type: object
+              properties:
+                input_schema:
+                  type: object
+                output_schema:
+                  type: object
+            permissions:
+              type: array
+              items:
+                type: string
+              description: Required permissions to execute this action
+            timeout:
+              type: integer
+              description: Max execution time in seconds
+              minimum: 1
+        required:
+          - name
+          - entity
+          - type
+
   plugins:
     type: array
     description: List of enabled plugins
