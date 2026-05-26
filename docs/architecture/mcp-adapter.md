@@ -446,3 +446,51 @@ def _import_customers(file_path: str, rows: list[dict]) -> dict:
 | Duplicate `**mapped` kwargs | `pop()` explicit fields before constructor call |
 | Excel column misalignment | `detect_shift()` scoring across candidate offsets |
 | Idempotent imports | Upsert by unique fields (`customer_id`, `company_name`, `email`) |
+
+---
+
+## Deployment Contract for Sensitive Data
+
+When an MCP Server manages sensitive business data, **code-level constraints are insufficient**. AI Agents have arbitrary code execution capability — any check placed inside the execution context can be inspected and bypassed by the agent itself.
+
+The only reliable protection is **architectural isolation**: the database is physically unreachable from the agent's execution context.
+
+### The Contract
+
+```
+AI Agent (any framework: OpenClaw / Hermes / other)
+    ↓ MCP over stdio (the ONLY legal data access gate)
+MCP Server (tools.py is the only data access path)
+    ↓ DB connection (MCP Server process only)
+Database (path and credentials unreachable from agent)
+```
+
+### Three Requirements
+
+1. **Database path outside agent workspace**
+   - Agent can explore its workspace but cannot guess or access `~/.hermes/.db/`
+2. **Credentials via `env:`, not filesystem**
+   - MCP Server config passes `DB_KEY`/`DB_PATH` via environment variables
+   - Agent cannot read another process's environment
+3. **No filesystem access to DB path**
+   - File permissions, containerization, or network isolation ensures this
+
+### MCP Server Packaging Requirement
+
+All MCP Servers generated from this framework MUST include this contract in their `README.md`:
+
+```markdown
+## Security / Deployment Requirements
+
+This MCP Server manages sensitive business data.
+The database MUST be isolated from the AI Agent's execution environment:
+
+1. Database file path MUST be outside the agent's workspace
+2. DB credentials MUST be passed via `env:` in your MCP config
+3. The agent MUST NOT have filesystem access to the DB file path
+
+Failure to meet these requirements allows the agent to bypass MCP tools
+and access data directly, defeating the purpose of access control.
+```
+
+See `docs/security/deployment-isolation.md` for the canonical reference, including implementation checklists and deployment patterns.

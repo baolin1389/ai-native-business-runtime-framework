@@ -352,3 +352,4 @@ If you discover a security vulnerability:
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [Python Security Guide](https://docs.python.org/3/tutorial/stdlib.html#crypto)
 - [MCP Security Considerations](./mcp-adapter.md#security)
+- [MCP Deployment Isolation](../security/deployment-isolation.md)
