@@ -291,3 +291,158 @@ def sig_to_schema(sig: inspect.Signature) -> dict:
 > ⚠️ **Do NOT name a directory `mcp/`** in your project root. Python's import system resolves `import mcp` to your local `mcp/` directory before the MCP SDK's `mcp/` package in site-packages. This causes `ImportError: cannot import name 'Server' from 'mcp'`.
 
 **Solution:** Rename `mcp/` to `ft_mcp_tools/`, `biz_tools/`, or any other name that doesn't conflict with the `mcp` top-level package.
+
+---
+
+## Import/Export Pattern in MCP Tools
+
+When your MCP tools need to handle bulk data import/export (CSV, JSON, Excel), apply these patterns to avoid common pitfalls.
+
+### Pattern: Session-In Data Extraction
+
+SQLAlchemy ORM objects become **detached** after the session closes. Accessing their attributes outside the session block raises `DetachedInstanceError`. Always extract data inside the `with get_db_session()` block:
+
+```python
+# ❌ WRONG — detached after session closes
+def export_customers(format: str = "csv") -> dict:
+    with get_db_session() as session:
+        repo = CustomerRepository(session)
+        rows = repo.get_all()
+    # rows are now detached!
+    return write_file(rows)  # fails
+
+# ✅ RIGHT — extract data inside session
+def export_customers(format: str = "csv") -> dict:
+    with get_db_session() as session:
+        repo = CustomerRepository(session)
+        rows = repo.get_all()
+        data = [{"id": r.id, "company_name": r.company_name} for r in rows]
+    # data is plain dict, safe to use outside session
+    return write_file(data, format)
+```
+
+### Pattern: Field Mapping Table with Multi-Language Headers
+
+Import tools must handle source files with different column naming conventions. Use a `FIELD_MAP` dict that maps source field names (including localized headers) to database column names:
+
+```python
+# In tools.py — the ONLY place field mapping lives
+FIELD_MAP = {
+    # English (exported files)
+    "company_name": "company_name",
+    "website":      "website",
+    "country":      "country",
+    "contact_email": "contact_email",
+    # Chinese (Excel imports from business users)
+    "公司名称":  "company_name",
+    "官网":      "website",
+    "国家":      "country",
+    "联系人邮箱": "contact_email",
+}
+
+def import_customers(file_path: str, format: str = "auto") -> dict:
+    detected = _detect_format(file_path)  # csv / json / xlsx
+    rows = _read_file(file_path, detected)
+
+    created = updated = skipped = 0
+    for row in rows:
+        mapped = {}
+        for src_field, db_field in FIELD_MAP.items():
+            if src_field in row:
+                mapped[db_field] = row[src_field]
+
+        # Remove prefixed IDs before constructor call to avoid duplicate kwargs
+        lead_id = mapped.pop("lead_id", None)
+        # ... upsert logic using mapped dict
+```
+
+### Pattern: `pop()` Before Passing `**mapped` to Constructor
+
+When importing, the mapped dict may still contain `lead_id`/`customer_id` keys from the source file's column names. Passing `**mapped` to a SQLAlchemy constructor after already extracting `lead_id` causes a duplicate keyword argument error:
+
+```python
+# ❌ WRONG — lead_id appears twice
+lead_id = mapped.get("lead_id")
+customer = Customer(lead_id=lead_id, **mapped)  # mapped still has "lead_id"!
+
+# ✅ RIGHT — pop it first
+lead_id = mapped.pop("lead_id", None)
+customer = Customer(lead_id=lead_id, **mapped)  # safe, lead_id removed from mapped
+```
+
+The same applies to any field passed as an explicit parameter before `**mapped`.
+
+### Pattern: Auto-Detect Format and Column Shift
+
+For Excel files that may have misaligned columns (e.g., inserted/deleted columns shifting data), auto-detect the shift and correct the mapping:
+
+```python
+def detect_shift(header: list[str], data_rows: list[list]) -> int:
+    """Score each candidate shift (-3 to +3) by header match rate."""
+    best_score, best_shift = -1, 0
+    for shift in range(-3, 4):
+        score = sum(
+            header[i + shift] == expected
+            for row in data_rows
+            for i, expected in enumerate(EXPECTED_HEADERS)
+            if 0 <= i + shift < len(header)
+        )
+        if score > best_score:
+            best_score, best_shift = score, shift
+    return best_shift
+
+def read_sheet_with_shift(ws, expected_headers: list[str], shift: int = 0) -> list[dict]:
+    """Read Excel rows, applying column shift correction."""
+    rows = []
+    for data_row in ws.iter_rows(min_row=2, values_only=True):
+        mapped = {}
+        for i, header in enumerate(expected_headers):
+            src_idx = i + shift
+            if 0 <= src_idx < len(data_row):
+                mapped[header] = data_row[src_idx]
+        rows.append(mapped)
+    return rows
+```
+
+### Pattern: Upsert with Unique Field Lookup
+
+Import should be idempotent — re-running the same file updates existing records rather than creating duplicates. Use the domain's unique identifier fields for lookup:
+
+```python
+def _import_customers(file_path: str, rows: list[dict]) -> dict:
+    created = updated = skipped = 0
+    for row in rows:
+        mapped = {k: v for k, v in row.items() if v is not None and k in CUSTOMER_FIELD_MAP.values()}
+        customer_id = mapped.pop("customer_id", None)
+
+        if customer_id:
+            existing = Customer.get_by_id(customer_id)
+            if existing:
+                for k, v in mapped.items():
+                    setattr(existing, k, v)
+                updated += 1
+            else:
+                Customer.create(customer_id=customer_id, **mapped)
+                created += 1
+        else:
+            # Fallback: lookup by unique fields
+            existing = Customer.get_by_company_name(mapped.get("company_name"))
+            if existing:
+                for k, v in mapped.items():
+                    setattr(existing, k, v)
+                updated += 1
+            else:
+                Customer.create(**mapped)
+                created += 1
+    return {"created": created, "updated": updated, "skipped": skipped}
+```
+
+### Summary
+
+| Concern | Solution |
+|---------|----------|
+| ORM detached after session | Extract data inside `with get_db_session()` block |
+| Multi-language Excel headers | `FIELD_MAP` dict with all language variants |
+| Duplicate `**mapped` kwargs | `pop()` explicit fields before constructor call |
+| Excel column misalignment | `detect_shift()` scoring across candidate offsets |
+| Idempotent imports | Upsert by unique fields (`customer_id`, `company_name`, `email`) |
