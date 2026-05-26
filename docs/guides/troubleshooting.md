@@ -216,6 +216,47 @@ model: gemini-1.5-flash
 
 ---
 
+### MCP Server Issues
+
+#### Problem: `ImportError: cannot import name 'Server' from 'mcp'`
+
+**Error:** `ModuleNotFoundError: No module named 'mcp.server'`
+
+**Cause:** Your project has a directory named `mcp/` in its root. Python's import system resolves `import mcp` to your local `mcp/` directory (which may contain an empty `__init__.py`) before the MCP SDK's `mcp/` package in site-packages.
+
+**Solution:** Rename the `mcp/` directory to avoid the conflict:
+
+```bash
+mv mcp/ ft_mcp_tools/
+```
+
+Then update all imports in your project:
+```python
+# Before
+from mcp.server import Server
+# After
+from ft_mcp_tools.tools import ...
+```
+
+#### Problem: MCP tool parameter names don't match engine parameter names
+
+**Symptom:** `lead_qualify_lead(score=80)` fails with "unknown parameter" but the action handler expects `qualification_score`.
+
+**Solution:** Do NOT add a field mapping in `mcp_server.py`. Instead, handle the conversion in `tools.py`:
+
+```python
+# tools.py — parameter mapping belongs HERE
+def qualify_lead(lead_id: str, score: int, notes: str = None) -> dict:
+    params = {"lead_id": lead_id, "qualification_score": score}
+    if notes:
+        params["qualification_notes"] = notes
+    return engine.execute("lead.qualify_lead", params)
+```
+
+See [MCP Server Mode](../architecture/mcp-adapter.md#mcp-server-mode-exposing-tools-to-ai) in the architecture docs for the full pattern.
+
+---
+
 ### Debugging
 
 #### Enable Verbose Logging
