@@ -9,11 +9,13 @@
 **Want to build a business system?** Just tell an AI:
 
 ```
-帮我根据 https://github.com/baolin1389/ai-native-business-runtime-framework
-生成一个[系统名称]系统，我的需求是：
-- 实体：[列出你的数据表]
-- 字段：[每个表的字段]
-- 业务规则：[有什么约束？]
+I want to build a [system name] system using the AI Business Runtime Framework.
+Here's what I need:
+- Entities: [list your data tables]
+- Fields: [fields for each table]
+- Business rules: [any constraints?]
+
+Repo: https://github.com/baolin1389/ai-native-business-runtime-framework
 ```
 
 The AI will read [AGENTS.md](./AGENTS.md), guide you through defining your entities and constraints, generate `entities.yaml`, run the code generator, and deliver a complete MCP server with `AI.md`.
@@ -43,12 +45,12 @@ The core problem this solves: **AI agents don't know your business rules.** With
 Read [AGENTS.md](./AGENTS.md) for the standard workflow. TL;DR:
 
 ```
-用户：「帮我生成 XX 系统」
-AI：
-  1. 引导用户提供：实体名、字段、业务规则
-  2. 生成 entities.yaml
-  3. 执行：python -m cli.main generate ...
-  4. 交付：mcp_server.py + AI.md
+User: "Generate a XX system for me"
+AI:
+  1. Guide user to provide: entity names, fields, business rules
+  2. Generate entities.yaml
+  3. Run: python -m cli.main generate ...
+  4. Deliver: mcp_server.py + AI.md
 ```
 
 ### For Developers (Manual)
