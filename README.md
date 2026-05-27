@@ -1,6 +1,6 @@
 # AI Business Runtime Framework
 
-**English** | [中文](#中文版)
+[**English**](./README.md) | [中文](./README_zh.md)
 
 ---
 
@@ -276,55 +276,3 @@ ai-business-runtime-framework/
 ## License
 
 MIT
-
----
-
-# 中文版
-
-## 一句话说明
-
-用 YAML 定义业务实体，一次生成：CRUD 引擎 + MCP 服务器 + AI 可读的操作手册。
-
-## 设计原则
-
-**约束是唯一真实来源。** 在 YAML 中定义一次 → engine 验证逻辑 + AI 提示 + MCP 工具描述三者同源。
-
-## 约束类型
-
-| 类型 | 说明 |
-|------|------|
-| `required` | 字段必填 |
-| `unique` | 字段值全局唯一 |
-| `unique_together` | 字段组合唯一 |
-| `required_if` | 当某字段为某值时必填 |
-| `min_length` / `max_length` | 字符串长度限制 |
-| `valid_transition` | 状态只能按固定路径转换 |
-| `custom` | 自定义 Python 表达式 |
-
-## 快速开始
-
-### AI 方式（推荐）
-
-告诉 AI：「帮我根据 ai-native-business-runtime-framework 生成 XX 系统」，然后 AI 会引导你完成。
-
-### 开发者方式
-
-```bash
-pip install -e .
-python -m cli.main init   # 交互式向导
-```
-
-或手动：
-
-```bash
-python -m cli.main generate \
-  --name <项目> --domain <领域> --entities entities.yaml
-cd output/<项目>
-python mcp_server.py
-```
-
-## 测试
-
-```bash
-pytest tests/ -v   # 32/32 通过
-```
