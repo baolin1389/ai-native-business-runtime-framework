@@ -13,7 +13,7 @@ from runtime_generator.templates import (
     mcp_server_py,
     models_py,
     domain_yaml,
-    example_workflow,
+    example_workflow_yaml as example_workflow,
 )
 
 
@@ -70,7 +70,13 @@ class GeneratorConfig:
 class RuntimeGenerator:
     """Generate a complete business runtime from structured input."""
 
-    def __init__(self, config: GeneratorConfig) -> None:
+    def __init__(self, config: GeneratorConfig | str) -> None:
+        if isinstance(config, str):
+            raise TypeError(
+                f"RuntimeGenerator expects a GeneratorConfig instance, got str: {config!r}. "
+                "Did you pass a project name instead of a GeneratorConfig? "
+                "Use GeneratorConfig(name='...') to construct."
+            )
         self.config = config
         self.entities: list[EntityDef] = []
         self.relations: list[RelationDef] = []
@@ -150,7 +156,7 @@ class RuntimeGenerator:
             path.write_text(content, encoding="utf-8")
 
     def _write_example_workflow(self, out: Path) -> None:
-        content = example_workflow(name=self.config.name)
+        content = example_workflow(name=self.config.name, entities=list(self.entities))
         workflows_dir = out / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
         (workflows_dir / "example.yaml").write_text(content, encoding="utf-8")

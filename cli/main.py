@@ -173,11 +173,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success).
     """
-    from runtime_generator import RuntimeGenerator, GeneratorConfig, ConfigGenerator
+    import json
+    from pathlib import Path
+
+    from runtime_generator.generator import RuntimeGenerator, GeneratorConfig
 
     if args.config:
-        import json
-
         with open(args.config) as f:
             config_data = json.load(f)
         config = GeneratorConfig(**config_data)
@@ -185,15 +186,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
         config = GeneratorConfig(output_dir=args.output)
 
     generator = RuntimeGenerator(config)
-    generated = generator.generate()
+    output_path = generator.save()
 
-    output_path = ConfigGenerator.save_config(
-        generated,
-        args.output / f"runtime_config.{args.format}",
-        format=args.format,
-    )
-
-    print(f"Generated configuration at {output_path}")
+    print(f"Generated runtime project at {output_path}")
     return 0
 
 

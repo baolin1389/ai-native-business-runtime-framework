@@ -26,6 +26,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "asyncio-mqtt>=0.16.0",
     "structlog>=24.0.0",
+    "tomli>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +50,9 @@ Repository = "https://github.com/your-org/ai-business-runtime-framework.git"
 Issues = "https://github.com/your-org/ai-business-runtime-framework/issues"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["runtime_core*", "runtime_generator*", "mcp_adapter*", "cli*"]
+exclude = ["tests*", "examples*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
