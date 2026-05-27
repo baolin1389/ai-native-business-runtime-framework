@@ -429,3 +429,200 @@ def _js_type(field_type: str) -> str:
         "json": "object",
     }
     return mapping.get(field_type, "string")
+
+
+# ---------------------------------------------------------------------------
+# AI prompt documentation
+# ---------------------------------------------------------------------------
+
+def ai_prompt_md(name: str, description: str, entities: list[Any]) -> str:
+    """Generate AI.md — AI-readable documentation of all actions and constraints.
+
+    This file is the AI's primary interface for understanding what it can do
+    and what business rules apply. It should be passed to the AI as system
+    context alongside the MCP tool definitions.
+
+    Generated content includes:
+    - Business overview
+    - Entity descriptions (what each entity represents)
+    - Action catalog with full semantic descriptions
+    - Field-level constraints and business rules
+    - Constraint rules expressed in plain English
+    - Error handling guidance
+    """
+
+    # Build sections
+    lines = []
+
+    # Header
+    lines.append(f"# {name} — AI Action Reference")
+    lines.append("")
+    if description:
+        lines.append(f"_{description}_")
+        lines.append("")
+    lines.append("This file documents all available actions, their constraints, and business rules.")
+    lines.append("Use it as system context when reasoning about data operations.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Entity overview
+    if entities:
+        lines.append("## Entities")
+        lines.append("")
+        for e in entities:
+            bm = getattr(e, "business_meaning", "") or e.description or "No description"
+            lines.append(f"- **{e.name}** — {bm}")
+        lines.append("")
+
+    # Action catalog
+    lines.append("## Available Actions")
+    lines.append("")
+    lines.append("Each action maps to a single MCP tool. Call them by name with the required parameters.")
+    lines.append("")
+
+    for e in entities:
+        pascal = _to_pascal(e.name)
+        domain = e.table_name
+        bm = getattr(e, "business_meaning", "") or e.description
+
+        lines.append(f"### {pascal} Management")
+        lines.append("")
+        if bm:
+            lines.append(f"A {pascal} represents: {bm}")
+            lines.append("")
+
+        # list action
+        lines.append(f"#### list_{domain}s")
+        lines.append("")
+        lines.append(f"Query {pascal} records with optional filters and pagination.")
+        lines.append("")
+        lines.append("**Parameters:**")
+        lines.append("")
+        lines.append("| Parameter | Type | Required | Description |")
+        lines.append("|-----------|------|----------|-------------|")
+        lines.append("| `limit` | integer | No | Max records to return (default: 20, max: 100) |")
+        lines.append("| `offset` | integer | No | Skip first N records for pagination |")
+        lines.append("| `order_by` | string | No | Field to sort by (prefix `-` for descending) |")
+        # Dynamic filter params
+        filterable = [f for f in e.fields if not f.primary_key and f.type in ("string", "text", "integer", "enum")]
+        for f in filterable[:5]:
+            fdesc = f"Filter by {f.name}" + (f" (one of: {', '.join(f.enum_values)})" if f.enum_values else "")
+            lines.append(f"| `{f.name}` | {f.type} | No | {fdesc} |")
+        lines.append("")
+        lines.append("**Returns:** `{success: bool, results: ...}`")
+        lines.append("")
+        lines.append("**Errors:** `success: false` when filters are invalid.")
+        lines.append("")
+
+        # get action
+        lines.append(f"#### get_{domain}")
+        lines.append("")
+        lines.append(f"Retrieve a single {pascal} by its ID.")
+        lines.append("")
+        lines.append("**Parameters:**")
+        lines.append("")
+        lines.append("| Parameter | Type | Required | Description |")
+        lines.append("|-----------|------|----------|-------------|")
+        lines.append(f"| `id` | string | **Yes** | The unique ID of the {pascal} |")
+        lines.append("")
+        lines.append(f"**Returns:** `success: true, result: {pascal}Record`")
+        lines.append("")
+        lines.append("**Errors:** `success: false` if no record matches.")
+        lines.append("")
+
+        # create action
+        lines.append(f"#### create_{domain}")
+        lines.append("")
+        lines.append(f"Create a new {pascal} record.")
+        lines.append("")
+        lines.append("**Parameters:**")
+        lines.append("")
+        lines.append("| Parameter | Type | Required | Description |")
+        lines.append("|-----------|------|----------|-------------|")
+        required_fields = [f for f in e.fields if f.required and not f.primary_key]
+        optional_fields = [f for f in e.fields if not f.required and not f.primary_key]
+        for f in required_fields:
+            enum_note = f" (one of: {', '.join(f.enum_values)})" if f.enum_values else ""
+            fdesc = f.description or f"Field: {f.name}" + enum_note
+            lines.append(f"| `{f.name}` | {f.type} | **Yes** | {fdesc} |")
+        for f in optional_fields:
+            enum_note = f" (one of: {', '.join(f.enum_values)})" if f.enum_values else ""
+            fdesc = f.description or f"Field: {f.name}" + enum_note
+            lines.append(f"| `{f.name}` | {f.type} | No | {fdesc} |")
+        lines.append("")
+
+        # Constraints
+        constraints = getattr(e, "constraints", [])
+        if constraints:
+            lines.append("**Business Rules (enforced):**")
+            lines.append("")
+            for c in constraints:
+                lines.append(f"- {c.to_ai_description()}")
+            lines.append("")
+
+        lines.append(f"**Returns:** `success: true, result: {pascal}Record`")
+        lines.append("")
+        lines.append("**Errors:** `success: false` when validation fails.")
+        lines.append("")
+
+        # update action
+        lines.append(f"#### update_{domain}")
+        lines.append("")
+        lines.append(f"Update an existing {pascal} record. Only provided fields are updated (partial update).")
+        lines.append("")
+        lines.append("**Parameters:**")
+        lines.append("")
+        lines.append("| Parameter | Type | Required | Description |")
+        lines.append("|-----------|------|----------|-------------|")
+        lines.append(f"| `id` | string | **Yes** | The ID of the {pascal} to update |")
+        updatable = [f for f in e.fields if not f.primary_key]
+        for f in updatable:
+            enum_note = f" (one of: {', '.join(f.enum_values)})" if f.enum_values else ""
+            req = "**Yes**" if f.required else "No"
+            fdesc = f.description or f"Field: {f.name}" + enum_note
+            lines.append(f"| `{f.name}` | {f.type} | {req} | {fdesc} |")
+        lines.append("")
+        if constraints:
+            lines.append("**Business Rules (enforced):**")
+            lines.append("")
+            for c in constraints:
+                lines.append(f"- {c.to_ai_description()}")
+            lines.append("")
+        lines.append(f"**Returns:** `success: true, result: {pascal}Record`")
+        lines.append("")
+        lines.append("**Errors:** `success: false` if no record matches.")
+        lines.append("")
+
+        # delete action
+        lines.append(f"#### delete_{domain}")
+        lines.append("")
+        lines.append(f"Permanently delete a {pascal} record.")
+        lines.append("")
+        lines.append("**Parameters:**")
+        lines.append("")
+        lines.append("| Parameter | Type | Required | Description |")
+        lines.append("|-----------|------|----------|-------------|")
+        lines.append(f"| `id` | string | **Yes** | The ID of the {pascal} to delete |")
+        lines.append("")
+        lines.append(f"**Returns:** `success: true`")
+        lines.append("")
+        lines.append("**Errors:** `success: false` if no record matches.")
+        lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    # General guidance
+    lines.append("## General Guidance for AI Agents")
+    lines.append("")
+    lines.append("1. **Always check constraints before writing.** Read the business rules for each action.")
+    lines.append("2. **Validate before create/update.** Call the action and inspect the result.")
+    lines.append("3. **Partial updates.** The `update_*` actions support partial updates — only include fields that changed.")
+    lines.append("4. **Pagination.** Use `limit` and `offset` to page through large result sets.")
+    lines.append("5. **Error handling.** All actions return `{success: bool, result/error: ...}`.")
+    lines.append("   - On `success: false`, inspect `error` and retry with corrected input.")
+    lines.append("6. **Unique constraints.** If `create` fails with a uniqueness error, query existing records first.")
+    lines.append("")
+
+    return "\n".join(lines)
