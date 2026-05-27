@@ -130,7 +130,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Handle the init command.
+    """Handle the init command — runs the interactive wizard.
 
     Args:
         args: Parsed command-line arguments.
@@ -138,18 +138,29 @@ def cmd_init(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success).
     """
-    from runtime_generator import RuntimeGenerator, GeneratorConfig
+    from runtime_generator.prompts import run_wizard
+    from runtime_generator.generator import build_generator, GeneratorConfig
+
+    print("Starting AI Business Runtime setup wizard...\n")
+
+    try:
+        answers = run_wizard()
+    except KeyboardInterrupt:
+        print("\n\nAborted by user.")
+        return 1
 
     config = GeneratorConfig(
-        name=args.name,
+        name=answers.get("name", args.name),
         output_dir=args.output_dir,
-        include_examples=not args.no_examples,
+        include_examples=answers.get("include_examples", not args.no_examples),
+        author=answers.get("author", ""),
+        description=answers.get("description", ""),
     )
 
-    generator = RuntimeGenerator(config)
-    output_path = generator.save()
+    gen = build_generator(config, answers)
+    output_path = gen.save()
 
-    print(f"Initialized runtime project '{args.name}' at {output_path}")
+    print(f"\nInitialized runtime project '{config.name}' at {output_path}")
     return 0
 
 

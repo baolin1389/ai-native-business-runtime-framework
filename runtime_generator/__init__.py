@@ -1,7 +1,5 @@
-"""Runtime Generator - Generate runtime configurations and scaffolding for AI business applications."""
+"""Runtime Generator — generate a complete business runtime from interactive input."""
 
-from .generator import RuntimeGenerator, GeneratorConfig
-from .config_generator import ConfigGenerator
+from runtime_generator.generator import RuntimeGenerator, GeneratorConfig
 
-__all__ = ["RuntimeGenerator", "GeneratorConfig", "ConfigGenerator"]
-__version__ = "0.1.0"
+__all__ = ["RuntimeGenerator", "GeneratorConfig"]
