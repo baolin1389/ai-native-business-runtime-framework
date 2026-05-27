@@ -237,12 +237,93 @@ AI Agent (Claude Desktop, etc.)
          domain_actions.py + SQLite
 ```
 
+### Python Interpreter Configuration
+
+**Critical:** MCP Server runs as a **subprocess spawned by Hermes** (or any AI framework). It does NOT inherit the agent's virtual environment by default. The `python3` command resolves via `PATH`, which typically points to the system Python — not the agent's venv where dependencies like `sqlmodel` and `mcp` are installed.
+
+**Symptom:** MCP Server fails with `ModuleNotFoundError: No module named 'sqlmodel'` even though `pip show sqlmodel` works in your shell.
+
+**Root cause:**
+```yaml
+# config.yaml — DO NOT use bare "python3"
+mcp_servers:
+  my-server:
+    command: python3          # ❌ resolves to /usr/bin/python3 (system)
+    workdir: /path/to/my-server
+```
+
+**Solution — always use an absolute path to the venv Python:**
+```yaml
+# config.yaml — use absolute path to venv Python
+mcp_servers:
+  my-server:
+    command: /path/to/.hermes/hermes-agent/venv/bin/python3  # ✅ venv
+    args:
+    - mcp_server.py
+    workdir: /path/to/my-server
+```
+
+**How to find the correct Python:**
+```bash
+# The venv Python that has all dependencies
+/hermes/hermes-agent/venv/bin/python3 -c "import sqlmodel, mcp; print('ok')"
+```
+
+**Framework generator should enforce this:** When scaffolding a new MCP Server project, write the absolute venv Python path into the project's `README.md` and any deployment docs, not a bare `python3`.
+
 ### Key Rules
 
 1. **tools.py is the single source of truth** — all parameter names, types, defaults, and field conversions (e.g., `score` → `qualification_score`) live here
 2. **mcp_server.py delegates to tools.py** — it does NOT call `engine.execute()` directly or hardcode schemas
 3. **mcp_server.py discovers tools dynamically** — use `inspect.signature()` to auto-generate JSON schemas from `tools.py` function signatures
 4. **No `mcp/` directory name** — if your project has a directory named `mcp/`, it will shadow the MCP SDK's `mcp/` package. Rename it to `ft_mcp_tools/` or similar
+
+### Tool Name ↔ Action Name Mapping (Critical)
+
+The MCP tool name exposed to the AI client (e.g., `lead_list_leads`) must match the engine action name exactly (e.g., `lead.list_leads` → action `list_leads`). **Do NOT introduce a second layer of translation names** — it is the primary source of tool-not-found bugs.
+
+Common failure pattern — double translation:
+```python
+# mcp_server.py — WRONG: introduces a second, fragile mapping
+_TOOL_NAME_MAP = {
+    "lead_list_leads": ("list_leads", "lead"),  # extra indirection
+    "email_list_email_records": ("list_email_records", "email"),  # mismatch!
+}
+# Meanwhile engine.list_actions() returns "email.list_emails" (no "_records")
+```
+
+Correct pattern — tool name IS the action name with domain prefix:
+```python
+# mcp_server.py — RIGHT: derive tool name directly from engine action
+# Domain: lead  → Tool prefix: "lead_"
+# Action: list_leads → Tool suffix: "list_leads"
+# Tool name: "lead_list_leads" — matches engine action "lead.list_leads"
+
+# Verify consistency at startup:
+available_actions = engine.list_actions()
+for domain, actions in available_actions.items():
+    for action in actions:
+        tool_name = f"{domain}_{action}"
+        assert tool_name in TOOL_MAP, f"Missing tool: {tool_name}"
+```
+
+**Startup consistency check** (add to `mcp_server.py` `__main__`):
+```python
+if __name__ == "__main__":
+    import asyncio
+    from runtime.engine import Engine
+
+    engine = Engine()
+    available = engine.list_actions()
+
+    # Verify every engine action has a corresponding tool
+    for domain, actions in available.items():
+        for action in actions:
+            tool_name = f"{domain}_{action}"
+            if tool_name not in TOOL_MAP:
+                print(f"WARNING: Engine action '{domain}.{action}' has no MCP tool '{tool_name}'")
+    # ... then start server
+```
 
 ### Parameter Mapping Pattern
 
@@ -494,3 +575,113 @@ and access data directly, defeating the purpose of access control.
 ```
 
 See `docs/security/deployment-isolation.md` for the canonical reference, including implementation checklists and deployment patterns.
+
+---
+
+## MCP Server Debugging Reference
+
+When an MCP Server is not responding or failing to connect, use this systematic debugging approach before assuming the server is broken.
+
+### Step 1: Verify the Python Environment
+
+```bash
+# Test that the intended Python can import all required packages
+/path/to/venv/bin/python3 -c "import sqlmodel, mcp; print('deps ok')"
+
+# Compare with system python
+python3 -c "import sqlmodel"  # likely fails with ModuleNotFoundError
+```
+
+### Step 2: Verify the MCP Server Starts (Direct Stdio Test)
+
+Simulate the JSON-RPC handshake manually — faster than waiting for framework timeouts:
+
+```python
+import subprocess, json, select
+
+proc = subprocess.Popen(
+    ['/path/to/venv/bin/python3', 'mcp_server.py'],
+    cwd='/path/to/my-mcp-server',
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
+# Send initialize request
+init_req = {
+    'jsonrpc': '2.0',
+    'id': 1,
+    'method': 'initialize',
+    'params': {
+        'protocolVersion': '2024-11-05',
+        'capabilities': {},
+        'clientInfo': {'name': 'debug', 'version': '1.0'}
+    }
+}
+proc.stdin.write((json.dumps(init_req) + '\n').encode())
+proc.stdin.flush()
+
+# Read response
+if select.select([proc.stdout], [], [], 5)[0]:
+    print(proc.stdout.readline().decode())
+else:
+    print("No response within 5s — server is hanging or crashing silently")
+
+proc.terminate()
+```
+
+A successful response looks like:
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05",...}}
+```
+
+If there is no output within 5 seconds, the server is crashing silently — check stderr.
+
+### Step 3: Check stderr for Silent Crashes
+
+```bash
+/path/to/venv/bin/python3 mcp_server.py 2>&1 &
+sleep 2
+ps aux | grep mcp_server        # is it running?
+kill %1 2>/dev/null
+```
+
+Common stderr errors:
+- `ModuleNotFoundError` → wrong Python, fix with absolute path (see Python Interpreter Configuration above)
+- `ImportError: cannot import name 'Server' from 'mcp'` → local `mcp/` directory shadows the MCP SDK package — rename to `ft_mcp_tools/`
+- `sqlite3.OperationalError: database is locked` → another process holds the DB lock
+
+### Step 4: Verify Tool ↔ Action Consistency
+
+```bash
+cd /path/to/my-mcp-server
+/path/to/venv/bin/python3 -c "
+import sys; sys.path.insert(0, '.')
+from runtime.engine import Engine
+e = Engine()
+actions = e.list_actions()
+print('Engine actions:', json.dumps(actions, indent=2))
+"
+```
+
+Compare this list against the tool names registered in `TOOL_MAP` in `mcp_server.py`. Any mismatch = tool silently unreachable.
+
+### Step 5: Framework MCP Test Failure with "Connection closed"
+
+If `hermes mcp test my-server` reports "Connection closed" but the server works in Step 2:
+
+- The framework's test may be sending additional JSON-RPC messages (e.g., `tools/list`) after initialization and expecting responses
+- The server is likely waiting for `initialized` notification before processing further requests
+- Add explicit `await server.send_notification("initialized", {})` before `server.run()` to signal readiness
+
+```python
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        # Send initialized notification to tell client we are ready
+        await server.send_notification("initialized", {})
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(),
+        )
+```
