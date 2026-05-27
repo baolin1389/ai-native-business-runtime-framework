@@ -6,367 +6,317 @@
 
 ## What Is This?
 
-一个 Python 代码生成框架，为 AI 外贸业务系统提供从**领域建模 → 完整代码生成 → 自动化运行**的全链路能力。
+A code generation framework that lets you define your business domain once, then generates everything an AI agent needs to work with your data correctly:
 
-你只需要定义 YAML 实体（Entity），框架自动生成：
+- **Structured data models** with field-level constraints
+- **Typed CRUD actions** that return consistent `{success, result/error}` responses
+- **MCP tool definitions** with rich semantic descriptions for AI agents
+- **AI.md** — a machine-readable action reference that explains business rules in plain English
 
-- **Runtime Engine** — CRUD 操作处理程序（SQLite + SQLModel）
-- **MCP Server** — JSON-RPC MCP 协议适配器，供 AI Agent 调用
-- **SQLModel 表** — 类型安全的数据库模型
-- **运行时配置** — `runtime.yaml`
-- **领域 schema** — `domains/{entity}.yaml`
-- **示例工作流** — `workflows/example.yaml`
+The core problem this solves: **AI agents don't know your business rules**. Without explicit declarations of what's allowed, what must be unique, and what conditions trigger validation, AI agents make invalid writes or miss business constraints.
 
 ---
 
-## Why Does This Exist?（解决了什么问题）
+## Core Design Principle
 
-### 痛点
+> **Constraints are the single source of truth.**
 
-AI 外贸业务系统通常面临以下循环：
-
-```
-每次新业务场景 → 手工写 CRUD API → 写数据库模型 → 配 MCP 工具 → 调试协议兼容 → 重复劳动
-```
-
-每增加一个实体（Lead、Customer、Order...），就要重复写一套：`engine.py handler` + `models.py` + `mcp_server.py tool` + `runtime.yaml config`。
-
-### 解决方案
-
-**一次建模，自动生成一切。**
+Define a constraint once in YAML, and it automatically becomes:
+- Data validation code in the generated CRUD handlers
+- Part of the AI.md action reference
+- A semantic note in the MCP tool description
 
 ```
-entities.yaml  →  RuntimeGenerator  →  app/runtime/engine.py
-                                    →  mcp_server.py
-                                    →  app/infrastructure/models.py
-                                    →  config/runtime.yaml
-                                    →  config/domains/{entity}.yaml
+Entity YAML  →  Validation logic  +  AI context  +  MCP description
+               (engine.py)          (AI.md)        (tool inputSchema)
 ```
-
-每新增一个实体，改一处 YAML，重新生成，工具立即在 AI Agent 中可用。
-
-### 核心价值
-
-| 维度 | 说明 |
-|------|------|
-| **效率** | 从手工 30 分钟/实体 → 框架 5 秒/实体 |
-| **一致性** | 所有实体遵循同一套命名、结构和协议 |
-| **可维护性** | 改 YAML 即可，无需追踪散落在多处的手写代码 |
-| **AI 原生** | MCP 协议适配器让 AI Agent 直接调用业务操作 |
 
 ---
 
-## Use Cases（适用场景）
+## Declaring Business Rules
 
-### 1. B2B 外贸客户管理
+```yaml
+entities:
+  - name: Lead
+    business_meaning: "A prospective customer who has shown interest"
+    fields:
+      - name: email
+        type: string
+        required: true
+        unique: true
+        description: "Contact email — must be unique system-wide"
+      - name: status
+        type: string
+        enum_values: [new, contacted, qualified, lost]
+      - name: source
+        type: string
+        enum_values: [website, referral, event, cold_outreach]
 
-定义 `Lead`、`Customer`、`Contact` 实体，生成完整的客户信息管理 runtime，MCP 工具自动暴露给 AI Agent，支持自然语言查询和操作客户数据。
+    constraints:
+      # When source is cold_outreach, a company name is required
+      - type: required_if
+        fields: [company]
+        explanation: "Company is needed to track cold outreach targets"
+        params:
+          when_field: source
+          when_value: cold_outreach
 
-### 2. AI Agent 外贸业务流程
+      # Status transitions follow a specific path
+      - type: valid_transition
+        fields: [status]
+        explanation: "Lead status must follow the pipeline: new → contacted → qualified → (won or lost)"
+        params:
+          from: [new]
+          to: [contacted, lost]
+```
 
-结合 [Hermes Agent](#hermes-agent-集成) 和 [OpenClaw](#openclaw-集成)，实现：
-- 自然语言录入新线索（Lead）
-- AI 自动识别客户类型、分配销售
-- 定时任务自动跟进未成交客户
-
-### 3. 多业务线快速启动
-
-新业务线（如宠物食品、化妆品原料）只需：
-1. 写一个新的 `entities.yaml`
-2. 运行生成命令
-3. 上线运营
+The `business_meaning` field is especially important — it tells the AI what this entity represents in real-world terms.
 
 ---
 
-## Architecture（架构）
+## Generated Outputs
+
+For each entity, the framework generates:
+
+| File | Purpose |
+|------|---------|
+| `app/runtime/engine.py` | CRUD action handlers with constraint validation |
+| `app/infrastructure/models.py` | SQLModel table definitions |
+| `mcp_server.py` | MCP JSON-RPC server with namespaced tool definitions |
+| `config/runtime.yaml` | Infrastructure config |
+| `app/domain/{entity}.yaml` | Entity schema |
+| `AI.md` | **AI-readable action reference** with all business rules |
+
+---
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   Hermes Agent / OpenClaw               │
-│              (自然语言 → AI 推理 → 工具调用)              │
+│                    AI Agent / Hermes / OpenClaw          │
+│            (understands business from AI.md)            │
 └─────────────────────┬───────────────────────────────────┘
-                      │ MCP JSON-RPC
+                      │ MCP JSON-RPC  +  AI.md context
                       ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   mcp_server.py                         │
-│         (TOOL_DEFINITIONS + TOOL_MAP)                  │
-│         将 MCP 工具映射到 engine action                 │
+│         TOOL_DEFINITIONS (with semantic descriptions)   │
 └─────────────────────┬───────────────────────────────────┘
-                      │ execute("action", params)
+                      │ execute(action, params)
                       ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  RuntimeEngine                          │
-│         (engine.py — CRUD action handlers)             │
-│         create_lead / list_leads / update_customer...  │
+│         engine.py — validates, then reads/writes       │
+│         All actions return {success, result/error}       │
 └─────────────────────┬───────────────────────────────────┘
                       │ SQLModel Session
                       ▼
 ┌─────────────────────────────────────────────────────────┐
 │              app/infrastructure/models.py              │
-│         (SQLModel — 自动生成的表结构)                   │
-└─────────────────────┬───────────────────────────────────┘
-                      │ SQLite
-                      ▼
-              data/{name}.db
+│         (SQLite / PostgreSQL / any SQLModel backend)   │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Quick Start
 
-### 安装
-
 ```bash
-git clone https://github.com/baolin1389/ai-native-business-runtime-framework.git
-cd ai-native-business-runtime-framework
 pip install -e .
 ```
 
-依赖：Python 3.10+，sqlmodel，pyyaml，tomli
-
-### Step 1：定义实体
+### Step 1: Define entities
 
 ```yaml
 # entities.yaml
-name: sales
-description: 外贸客户管理系统
-author: Eric
+name: crm
+description: Customer relationship management domain
 
 entities:
   - name: Lead
-    table_name: lead
-    description: 销售线索
+    business_meaning: "A prospective customer who has shown initial interest"
     fields:
       - name: id
         type: string
         primary_key: true
-      - name: name
-        type: string
-        required: true
       - name: email
         type: string
         required: true
-      - name: company
+        unique: true
+        description: "Primary contact email — unique across all leads"
+      - name: name
         type: string
+        required: true
+      - name: status
+        type: string
+        enum_values: [new, contacted, qualified, lost]
       - name: source
         type: string
-        enum_values: [website, trade_show, referral, cold_call]
+        enum_values: [website, referral, event, cold_outreach]
+    constraints:
+      - type: required_if
+        fields: [company]
+        explanation: "Company name is required for cold outreach leads"
+        params:
+          when_field: source
+          when_value: cold_outreach
 
   - name: Customer
-    table_name: customer
-    description: 已成交客户
+    business_meaning: "A paying customer with an active contract"
     fields:
       - name: id
         type: string
         primary_key: true
-      - name: name
-        type: string
-        required: true
       - name: email
         type: string
         required: true
-      - name: level
+      - name: tier
         type: string
-        enum_values: [A, B, C]
+        enum_values: [standard, premium, enterprise]
 ```
 
-### Step 2：生成代码
+### Step 2: Generate
 
 ```bash
 python -m cli.main generate \
-  --name sales \
-  --domain crm \
+  --name crm \
+  --domain sales \
   --entities entities.yaml \
   --output ./output
 ```
 
-生成的目录结构：
+Output:
 
 ```
-output/sales/
+output/crm/
+├── AI.md                       ← AI agent's primary reference
 ├── app/
+│   ├── domain/
+│   │   └── lead.yaml
 │   ├── infrastructure/
-│   │   └── models.py       # LeadModel, CustomerModel
+│   │   └── models.py          ← SQLModel tables
 │   └── runtime/
-│       └── engine.py       # _create_lead, _list_leads, _update_customer...
+│       └── engine.py          ← CRUD + validation
 ├── config/
-│   ├── runtime.yaml        # 数据库路径、实体列表
-│   └── domains/
-│       ├── lead.yaml
-│       └── customer.yaml
-├── mcp_server.py           # MCP JSON-RPC Server
-└── workflows/
-    └── example.yaml
+│   └── runtime.yaml
+└── mcp_server.py              ← MCP server
 ```
 
-### Step 3：运行 MCP Server
+### Step 3: Run
 
 ```bash
-cd output/sales
+cd output/crm
 python mcp_server.py
 ```
 
-Server 通过 stdin/stdout 接收 JSON-RPC 请求，响应格式符合 MCP 协议规范。
+---
+
+## How AI Agents Use This
+
+AI agents receive two things:
+
+1. **MCP tool definitions** — via the MCP protocol, including `description` and `inputSchema`
+2. **AI.md** — passed as system context (or prompt prefix) to the agent
+
+The `AI.md` file is the key difference. It contains:
+
+```markdown
+## Lead Management
+
+A Lead represents: A prospective customer who has shown initial interest
+
+### create_lead
+
+Create a new Lead record.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `email` | string | **Yes** | Primary contact email — unique across all leads |
+...
+
+**Business Rules (enforced):**
+- **Required when [source] is [cold_outreach]**: Company is required for cold outreach leads
+```
+
+The AI reads `AI.md`, understands the business rules, and can make informed decisions about data operations.
 
 ---
 
-## Hermes Agent 集成
+## Constraint Types
 
-### 配置 MCP Server
+| Type | Purpose |
+|------|---------|
+| `required` | Field must be non-empty |
+| `unique` | Field value must be unique across all records |
+| `unique_together` | Combination of fields must be unique |
+| `required_if` | Field is required when another field has a specific value |
+| `min_length` / `max_length` | String length bounds |
+| `valid_transition` | State field can only transition through allowed values |
+| `custom` | Arbitrary Python expression evaluated at write time |
 
-在 Hermes Agent 的 `config.yaml` 中添加 `foreign-trade-mcp`（已有）：
-
-```yaml
-mcp_servers:
-  foreign-trade-mcp:
-    command: /Users/ICECOOL/.hermes/hermes-agent/venv/bin/python3
-    args:
-      - /Users/ICECOOL/.hermes/workspace/ai-business-runtime-framework
-      - --mcp-server
-    env: {}
-```
-
-### 在 Hermes 中使用生成的 Runtime
-
-通过 `ai-business-runtime` skill 或直接调用：
-
-```python
-# 场景：Hermes 定时任务中发现新线索，录入系统
-from runtime_generator.generator import RuntimeGenerator, GeneratorConfig, EntityDef, FieldDef
-from runtime_core.engine import RuntimeEngine
-
-# 加载已生成的 engine
-engine = RuntimeEngine()  # 自动读取 config/runtime.yaml
-
-# 录入线索
-result = engine.execute("create_lead", {
-    "name": "John Smith",
-    "email": "john@acme.com",
-    "company": "Acme Corp",
-    "source": "trade_show"
-})
-print(result)
-# → {"success": True, "result": {...}}
-
-# 查询线索
-leads = engine.execute("list_leads", {"limit": 10})
-```
-
-### 通过 MCP 工具暴露给 AI
-
-生成的 `mcp_server.py` 注册了以下工具：
-
-| 工具名 | 对应 action | 说明 |
-|--------|-------------|------|
-| `mcp_lead_list_leads` | `list_leads` | 分页查询线索 |
-| `mcp_lead_create_lead` | `create_lead` | 创建新线索 |
-| `mcp_lead_get_lead` | `get_lead` | 按 ID 查询 |
-| `mcp_lead_update_lead` | `update_lead` | 更新线索信息 |
-| `mcp_lead_delete_lead` | `delete_lead` | 删除线索 |
-| `mcp_customer_list_customers` | `list_customers` | 查询客户 |
-| `mcp_customer_create_customer` | `create_customer` | 创建客户 |
-| ... | ... | ... |
-
-AI Agent 通过 MCP 协议调用这些工具，实现自然语言驱动的业务操作。
+All constraints generate both:
+- **Validation code** in `engine.py` that blocks invalid writes
+- **Natural language explanation** in `AI.md` that tells AI agents why the constraint exists
 
 ---
 
-## OpenClaw 集成
+## MCP Tool Description Best Practices
 
-### 方式一：通过 MCP 协议调用
+The framework generates MCP tool definitions following these principles:
 
-OpenClaw 的 Agent 通过 MCP 协议调用 `mcp_server.py` 暴露的工具：
+- **Semantic descriptions** — not just "creates a lead" but "Creates a new Lead record. Email must be unique system-wide."
+- **Namespace prefixes** — tools grouped by entity: `lead_create`, `lead_list`, `customer_update`
+- **Rich inputSchema** — descriptions on each parameter explain business meaning
+- **Action consistency** — all tools return `{success: true, result: ...}` or `{success: false, error: "..."}`
+
+---
+
+## CLI
 
 ```bash
-# 启动 mcp_server（后台运行）
-cd output/sales
-python mcp_server.py &
-
-# OpenClaw Agent 通过 MCP 协议调用工具
-# 工具自动映射到 engine action
-```
-
-### 方式二：在 OpenClaw Workflow 中使用
-
-在 OpenClaw 的 AI workflow 定义中引用生成的 runtime：
-
-```python
-# openclaw_workflow.py
-from runtime_core.engine import RuntimeEngine
-
-def process_lead_workflow(lead_data: dict):
-    engine = RuntimeEngine()
-    
-    # AI 判断客户等级
-    level = classify_customer(lead_data)
-    
-    # 创建线索
-    result = engine.execute("create_lead", {**lead_data, "level": level})
-    
-    # 根据等级分配跟进策略
-    if level == "A":
-        schedule_follow_up(lead_data, priority="high")
-    else:
-        schedule_follow_up(lead_data, priority="normal")
-    
-    return result
-```
-
----
-
-## CLI 命令
-
-```bash
-# 交互式初始化（向导模式）
+# Interactive wizard
 python -m cli.main init
 
-# 从 YAML 生成
+# Generate from YAML
 python -m cli.main generate \
-  --name <项目名> \
-  --domain <领域> \
-  --entities <entities.yaml>
+  --name <project> \
+  --domain <domain> \
+  --entities <file.yaml>
 
-# 验证 YAML
+# Validate YAML
 python -m cli.main validate --entities <file.yaml>
 ```
 
 ---
 
-## 测试
+## Testing
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v   # 32/32 passing
 ```
-
-**当前状态：32/32 通过**
-
-| 测试文件 | 覆盖范围 |
-|---------|---------|
-| `test_runtime_engine.py` | RuntimeEngine, TaskExecutor, ExecutionContext（12项）|
-| `test_runtime_generator.py` | GeneratorConfig, RuntimeGenerator, CLI（7项）|
-| `test_templates.py` | 所有模板 AST 验证、YAML 生成、端到端（13项）|
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 ai-business-runtime-framework/
 ├── runtime_core/
-│   ├── engine.py          # RuntimeEngine（CRUD action 执行器）
-│   ├── config.py          # YAML 配置加载
-│   ├── state_machine.py  # 状态机定义
-│   ├── event_bus.py      # 事件总线
-│   └── models.py         # SQLModel 会话管理
+│   ├── engine.py           # RuntimeEngine, action handlers
+│   ├── config.py          # YAML config loader
+│   ├── state_machine.py
+│   ├── event_bus.py
+│   └── models.py          # SQLModel session
 ├── runtime_generator/
-│   ├── generator.py      # RuntimeGenerator + 数据类
-│   ├── templates.py      # 代码生成器（engine_py, mcp_server_py...）
-│   └── cli/main.py       # CLI 入口
+│   ├── generator.py       # RuntimeGenerator, data classes
+│   ├── templates.py        # Code generators
+│   └── cli/main.py
 ├── tests/
-│   ├── test_runtime_engine.py
-│   ├── test_runtime_generator.py
-│   └── test_templates.py
-├── docs/architecture/     # 架构设计文档
+│   ├── test_runtime_engine.py      # 12 tests
+│   ├── test_runtime_generator.py   # 7 tests
+│   └── test_templates.py           # 13 tests
+├── docs/architecture/
 ├── pyproject.toml
 └── requirements.txt
 ```
@@ -381,33 +331,37 @@ MIT
 
 # 中文版
 
-## 是什么？
+## 这个框架做什么？
 
-一个 **AI 外贸业务 runtime 代码生成框架**。用 YAML 定义领域实体，自动生成完整的外贸业务运行时代码（Engine + MCP Server + SQLModel + 配置文件）。
+用 YAML 定义业务实体，一次性生成：
 
-## 解决了什么问题？
+- **数据模型**（带字段级约束）
+- **CRUD 操作处理程序**（统一返回 `{success, result/error}`）
+- **MCP 工具定义**（带 AI 可理解的语义描述）
+- **AI.md**（AI 可读的操作参考文档，包含所有业务规则）
 
-每次新增加一个业务实体（Lead、Customer、Order），需要：
-- 写 CRUD handler
-- 写 SQLModel 表
-- 配 MCP 工具
-- 写配置文件
+核心解决的问题：**AI 不知道你的业务规则是什么。**
 
-**这个框架让你只改一处 YAML，重新生成，全部自动搞定。**
+## 设计原则
 
-## 核心价值
+> **约束是唯一真实来源。**
 
-| 效率 | 一键从 YAML 生成完整代码，新增实体只需 5 秒 |
-|------|---------------------------------------|
-| 一致性 | 所有实体统一命名、结构和协议 |
-| 可维护 | 改 YAML 即可，无需追踪散落的手写代码 |
-| AI 原生 | MCP 协议让 AI Agent 直接调用业务操作 |
+在 YAML 中定义一次约束，自动转化为：
+- `engine.py` 中的数据验证逻辑
+- `AI.md` 中的自然语言说明
+- MCP 工具 `description` 中的语义注释
 
-## 适用场景
+## 约束类型
 
-1. **B2B 外贸客户管理** — 线索、客户、联系人全程数字化
-2. **AI Agent 外贸业务流程** — 自然语言录入/查询/操作客户数据
-3. **多业务线快速启动** — 新品类只需写 YAML + 生成
+| 类型 | 说明 |
+|------|------|
+| `required` | 字段不能为空 |
+| `unique` | 字段值全局唯一 |
+| `unique_together` | 字段组合唯一 |
+| `required_if` | 当某字段为某值时必填 |
+| `min_length` / `max_length` | 字符串长度限制 |
+| `valid_transition` | 状态字段只能按允许路径转换 |
+| `custom` | 自定义 Python 表达式 |
 
 ## 快速开始
 
@@ -416,39 +370,45 @@ MIT
 ```yaml
 entities:
   - name: Lead
-    table_name: lead
+    business_meaning: "表现出初步兴趣的潜在客户"
     fields:
-      - name: id; type: string; primary_key: true
-      - name: name; type: string; required: true
-      - name: email; type: string; required: true
+      - name: email
+        type: string
+        required: true
+        unique: true
+      - name: status
+        type: string
+        enum_values: [new, contacted, qualified, lost]
+    constraints:
+      - type: required_if
+        fields: [company]
+        explanation: "冷启动线索必须填写公司名称"
+        params:
+          when_field: source
+          when_value: cold_outreach
 ```
 
-### Step 2：生成代码
+### Step 2：生成
 
 ```bash
 python -m cli.main generate \
-  --name sales --domain crm --entities entities.yaml
+  --name crm --domain sales --entities entities.yaml
 ```
 
 ### Step 3：运行
 
 ```bash
-cd output/sales
-python mcp_server.py  # 启动 MCP Server
+cd output/crm
+python mcp_server.py
 ```
 
-## Hermes Agent 集成
+## AI 如何使用
 
-在 `config.yaml` 中配置 `foreign-trade-mcp` 后，通过 MCP 协议调用生成的工具：
+AI Agent 收到两样东西：
+1. **MCP 工具定义**（通过 MCP 协议，含 `description` 和 `inputSchema`）
+2. **AI.md**（作为系统上下文或 prompt 前缀）
 
-```python
-engine = RuntimeEngine()  # 读取 config/runtime.yaml
-engine.execute("create_lead", {"name": "Eric", "email": "eric@example.com"})
-```
-
-## OpenClaw 集成
-
-OpenClaw Agent 通过 MCP 协议调用 `mcp_server.py` 中暴露的工具，实现自然语言驱动的业务操作。
+`AI.md` 包含每个操作的完整说明，包括业务规则的自然语言解释。AI 读懂业务规则后，可以做出正确的决策。
 
 ## 测试
 
