@@ -213,37 +213,18 @@ python mcp_server.py
 
 ## How AI Agents Use This
 
-AI agents receive two things:
+AI agents follow the workflow defined in [AGENTS.md](./AGENTS.md) — a standard procedure for:
 
-1. **MCP tool definitions** — via the MCP protocol, including `description` and `inputSchema`
-2. **AI.md** — passed as system context (or prompt prefix) to the agent
+1. **Gathering requirements** from the user (entity names, fields, business rules)
+2. **Building `entities.yaml`** from the conversation
+3. **Generating the runtime** via `python -m cli.main generate`
+4. **Delivering the MCP server + AI.md** with usage instructions
 
-The `AI.md` file is the key difference. It contains:
-
-```markdown
-## Lead Management
-
-A Lead represents: A prospective customer who has shown initial interest
-
-### create_lead
-
-Create a new Lead record.
-
-**Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `email` | string | **Yes** | Primary contact email — unique across all leads |
-...
-
-**Business Rules (enforced):**
-- **Required when [source] is [cold_outreach]**: Company is required for cold outreach leads
-```
-
-The AI reads `AI.md`, understands the business rules, and can make informed decisions about data operations.
+When an AI agent clones this repo and reads it, `AGENTS.md` is the file that tells it what to do.
 
 ---
 
-## Constraint Types
+## MCP Tool Description Best Practices
 
 | Type | Purpose |
 |------|---------|
