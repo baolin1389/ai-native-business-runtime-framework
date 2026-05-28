@@ -6,12 +6,23 @@
 
 ## 何时使用
 
-用户提出以下类似需求时，按本手册执行：
+用户提出以下类似需求时，**不要直接生成**，先运行 `python -m cli.main plan`：
 
 - 「帮我根据 ai-native-business-runtime-framework 生成一个 XX 系统」
 - 「我想做一个 XX 管理平台，帮我定义数据表和业务逻辑」
 - 「我要构建 XX 业务系统，帮我生成 MCP」
 - 「我想用这个框架做一个 XX」
+
+**标准响应：**
+
+```
+好的！我先用交互式向导帮你收集需求，生成 entities.yaml 草稿，
+你确认后再生成完整代码。
+
+→ python -m cli.main plan
+```
+
+禁止在未经用户确认的情况下直接生成 entities.yaml 或运行 generate 命令。
 
 ---
 
@@ -25,106 +36,40 @@
 
 ## 工作流程
 
-### 第一步：了解业务全貌
+### 第一步：收集需求（`python -m cli.main plan`）
 
-用以下问题引导用户，收集所有必要信息：
-
-```
-好的，我先帮你梳理清楚需求：
-
-1. 【实体（数据表）】
-   这个系统有哪些核心对象？比如：用户、订单、产品、会员...
-   请列出所有实体名称。
-
-2. 【字段定义】
-   每个实体有哪些字段？请告诉我：
-   - 字段名称（英文，用于代码）
-   - 字段类型（string / text / integer / float / boolean / datetime / enum）
-   - 业务含义（这个字段代表什么）
-   - 是否必填
-   - 是否唯一（如邮箱、编号）
-   - 枚举值（如状态字段有哪几种）
-
-3. 【业务约束】
-   有什么业务规则需要遵守？比如：
-   - 什么情况下某个字段必须填写？
-   - 什么情况下不能重复（如邮箱、编号）？
-   - 状态字段的转换路径（如 new → processing → done）？
-   - 有什么自定义的业务逻辑？
-
-4. 【其他需求】
-   - 系统名称是什么？
-   - 有没有工作流需要定义？
-```
-
-### 第二步：构建 entities.yaml
-
-根据用户回答，写出完整的 `entities.yaml`。
-
-**标准模板：**
-
-```yaml
-name: <系统名称，英文>
-description: <系统描述>
-author: <用户名称>
-
-entities:
-  - name: <实体名，PascalCase，如 Lead、Order、Product>
-    table_name: <表名，snake_case，如 lead、order、product>
-    business_meaning: <这个实体代表什么，用一句话说清楚>
-    description: <可选，补充说明>
-    fields:
-      - name: id
-        type: string
-        primary_key: true
-        description: "唯一标识符"
-
-      - name: <字段名>
-        type: <类型>
-        required: <true/false>
-        unique: <true/false>
-        indexed: <true/false>
-        description: "<字段的业务含义>"
-        enum_values:  # 仅当 type 为 enum 时
-          - <值1>
-          - <值2>
-
-    constraints:  # 如有业务约束
-      - type: <required_if/unique/valid_transition/custom>
-        fields: [<字段名>]
-        explanation: "<用自然语言解释这条规则>"
-        params:
-          # 根据 type 不同，填写对应参数
-```
-
-### 第三步：调用生成器
-
-在项目目录下执行：
+当用户说「帮我生成 XX 系统」时，**不要直接生成**，先运行 plan 命令收集需求：
 
 ```bash
-python -m cli.main generate \
-  --name <系统名称，英文> \
-  --domain <领域标识，如 crm、erp、sales> \
-  --entities entities.yaml \
-  --output ./output
+python -m cli.main plan
 ```
 
-或在 Python 中直接调用：
+这会启动交互式向导，询问：
+1. 系统名称
+2. 实体列表（Lead、Order、Product…）
+3. 每个实体的字段（名称、类型、是否必填）
+4. 业务约束（唯一、状态转换、条件必填…）
+5. 需求摘要确认
 
-```python
-from runtime_generator.generator import RuntimeGenerator, GeneratorConfig, EntityDef, FieldDef, ConstraintDef
+确认后生成 `entities.yaml`，或直接保存到指定路径：
+```bash
+python -m cli.main plan -o my-system/entities.yaml
+```
 
-config = GeneratorConfig(
-    name="<系统名称>",
-    output_dir="./output"
-)
-generator = RuntimeGenerator(config)
+### 第二步：预览（`python -m cli.main generate --dry-run`）
 
-# 添加所有实体（从 entities.yaml 解析）
-generator.add_entity(EntityDef(...))
-# ...
+在正式生成前，**先用 dry-run 预览**，让用户确认：
+```bash
+python -m cli.main generate --config my-system/entities.yaml --dry-run
+```
 
-generator.save()
+这会显示将要生成的实体、字段、约束和文件列表，**不写入任何文件**。
+
+### 第三步：生成（`python -m cli.main generate`）
+
+用户确认无误后，正式生成：
+```bash
+python -m cli.main generate --config my-system/entities.yaml
 ```
 
 ### 第四步：交付物检查
